@@ -1,4 +1,5 @@
 import express from "express";
+import * as _ from "lodash";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import Station from "./interfaces/Station";
@@ -10,6 +11,7 @@ import Join from "./interfaces/Join";
 // https://us-central1-stations-api-sora0202.cloudfunctions.net/api
 
 // TODO: データから全件数を取得するようにする。
+const STATION_COUNT: number = 10853;
 const LINE_COUNT: number = 617;
 
 // Start writing Firebase Functions
@@ -83,6 +85,36 @@ router.get(
   }
 );
 
+router.get(
+  "/randomStations",
+  async (req: express.Request, res: express.Response) => {
+    if (!req.query.count) {
+      res.status(400).send({ msg: MESSAGES.MISS_PARAMETER });
+      return;
+    }
+
+    const index: number = Math.floor(Math.random() * STATION_COUNT + 1);
+    const query: admin.database.Query = db
+      .ref("stations")
+      .orderByChild("index")
+      .startAt(index)
+      .limitToFirst(Number(req.query.count));
+
+    try {
+      const data: admin.database.DataSnapshot = await query.once("value");
+      const stations: { [s: string]: Station } = data.val();
+
+      if (stations) {
+        res.status(200).send(stations);
+      } else {
+        res.status(404).send({ msg: MESSAGES.NOT_FOUND });
+      }
+    } catch (error) {
+      res.status(500).send(error);
+    }
+  }
+);
+
 router.get("/lines", async (req: express.Request, res: express.Response) => {
   const ref: admin.database.Reference = db.ref("lines");
 
@@ -136,10 +168,10 @@ router.get(
       .startAt(index)
       .limitToFirst(Number(req.query.count));
 
-    const data: admin.database.DataSnapshot = await query.once("value");
-    const lines: { [s: string]: Line } = data.val();
-
     try {
+      const data: admin.database.DataSnapshot = await query.once("value");
+      const lines: { [s: string]: Line } = data.val();
+
       if (lines) {
         res.status(200).send(lines);
       } else {
