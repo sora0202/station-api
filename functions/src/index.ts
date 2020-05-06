@@ -2,17 +2,17 @@ import express from "express";
 import * as _ from "lodash";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { StationFunctions } from "./stations";
+import { LineFunctions } from "./lines";
 import Station from "./interfaces/Station";
 import Line from "./interfaces/Line";
 import Company from "./interfaces/Company";
 import Join from "./interfaces/Join";
+import { Choice, Quiz } from "./interfaces/Quiz";
+// import Quiz from "./interfaces/Quiz";
 
 // APIサーバURLベース
 // https://us-central1-stations-api-sora0202.cloudfunctions.net/api
-
-// TODO: データから全件数を取得するようにする。
-const STATION_COUNT: number = 10853;
-const LINE_COUNT: number = 617;
 
 // Start writing Firebase Functions
 // https://firebase.google.com/docs/functions/typescript
@@ -24,6 +24,8 @@ const MESSAGES: { [s: string]: string } = {
 
 admin.initializeApp();
 const db: admin.database.Database = admin.database();
+const stationFunctions: StationFunctions = new StationFunctions(db);
+const lineFunctions: LineFunctions = new LineFunctions(db);
 
 const app: express.Express = express();
 app.use(
@@ -93,16 +95,10 @@ router.get(
       return;
     }
 
-    const index: number = Math.floor(Math.random() * STATION_COUNT + 1);
-    const query: admin.database.Query = db
-      .ref("stations")
-      .orderByChild("index")
-      .startAt(index)
-      .limitToFirst(Number(req.query.count));
-
     try {
-      const data: admin.database.DataSnapshot = await query.once("value");
-      const stations: { [s: string]: Station } = data.val();
+      const stations: {
+        [s: string]: Station;
+      } = await stationFunctions.fetchRandomStations(Number(req.query.count));
 
       if (stations) {
         res.status(200).send(stations);
@@ -135,12 +131,8 @@ router.get("/lines", async (req: express.Request, res: express.Response) => {
 router.get(
   "/lines/:id",
   async (req: express.Request, res: express.Response) => {
-    const query: string = "lines/" + req.params.id;
-    const ref: admin.database.Reference = db.ref(query);
-
     try {
-      const data: admin.database.DataSnapshot = await ref.once("value");
-      const line: Line = data.val();
+      const line: Line = await lineFunctions.fetchLine(Number(req.params.id));
 
       if (line) {
         res.status(200).send(line);
@@ -161,16 +153,10 @@ router.get(
       return;
     }
 
-    const index: number = Math.floor(Math.random() * LINE_COUNT + 1);
-    const query: admin.database.Query = db
-      .ref("lines")
-      .orderByChild("index")
-      .startAt(index)
-      .limitToFirst(Number(req.query.count));
-
     try {
-      const data: admin.database.DataSnapshot = await query.once("value");
-      const lines: { [s: string]: Line } = data.val();
+      const lines: { [s: string]: Line } = await lineFunctions.fetchRandomLines(
+        Number(req.query.count)
+      );
 
       if (lines) {
         res.status(200).send(lines);
@@ -262,6 +248,70 @@ router.get(
   }
 );
 
+async function fetchChoice(station: Station): Promise<Choice> {
+  const CHOICE_COUNT = 4;
+
+  try {
+    const answer: Line = await lineFunctions.fetchLine(station.line_cd);
+    const randomLines: {
+      [s: string]: Line;
+    } = await lineFunctions.fetchRandomLines(CHOICE_COUNT - 1);
+    const others: Line[] = Object.values(randomLines);
+
+    console.log("others:");
+    const choice: Line[] = [answer, ...others];
+
+    return {
+      station_cd: station.station_cd,
+      choice: _.shuffle(choice),
+    } as Choice;
+  } catch (error) {
+    throw error;
+  }
+}
+
+router.get("/quiz", async (req: express.Request, res: express.Response) => {
+  console.log("GET /quiz");
+  if (!req.query.count) {
+    console.error("Miss Paramter.");
+    res.status(400).send({ msg: MESSAGES.MISS_PARAMETER });
+    return;
+  }
+
+  try {
+    const stations: {
+      [s: string]: Station;
+    } = await stationFunctions.fetchRandomStations(Number(req.query.count));
+
+    if (!stations) {
+      res.status(404).send({ msg: MESSAGES.NOT_FOUND });
+      return;
+    }
+
+    const promises = _.map(stations, fetchChoice);
+    const choices = await Promise.all(promises);
+
+    if (!choices) {
+      console.error("Not Found choices.");
+      res.status(404).send({ msg: MESSAGES.NOT_FOUND });
+      return;
+    }
+
+    const quiz: { [s: string]: Quiz } = _.mapValues(stations, (s: Station) => {
+      return {
+        question: s,
+        choice: _.find(choices, (c) => c.station_cd === s.station_cd),
+      } as Quiz;
+    });
+
+    res.status(200).send(quiz);
+    console.error("GET /quiz end");
+  } catch (error) {
+    console.error("GET /quiz error");
+    console.error(error);
+    res.status(500).send(error);
+  }
+});
 app.use(router);
 
 export const api = functions.https.onRequest(app);
