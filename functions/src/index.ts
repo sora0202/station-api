@@ -1,4 +1,6 @@
 import express from "express";
+import bodyParser from "body-parser";
+import cors from "cors";
 import * as _ from "lodash";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
@@ -9,7 +11,7 @@ import Line from "./interfaces/Line";
 import Company from "./interfaces/Company";
 import Join from "./interfaces/Join";
 import { Choice, Quiz } from "./interfaces/Quiz";
-// import Quiz from "./interfaces/Quiz";
+import Answer from "./interfaces/Answer";
 
 // APIサーバURLベース
 // https://us-central1-stations-api-sora0202.cloudfunctions.net/api
@@ -28,13 +30,11 @@ const stationFunctions: StationFunctions = new StationFunctions(db);
 const lineFunctions: LineFunctions = new LineFunctions(db);
 
 const app: express.Express = express();
-app.use(
-  (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS, POST");
-    next();
-  }
-);
+// 全APIでCORS許可
+app.use(cors());
+// リクエストボディをjsonに変換する
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
 
 const router: express.Router = express.Router();
 
@@ -312,6 +312,38 @@ router.get("/quiz", async (req: express.Request, res: express.Response) => {
     res.status(500).send(error);
   }
 });
+
+router.post("/answer", async (req: express.Request, res: express.Response) => {
+  console.log("POST /answer");
+
+  if (Object.keys(req.body).length === 0) {
+    console.error("POST /answer MISS_PARAMETER");
+    res.status(400).send({ msg: MESSAGES.MISS_PARAMETER });
+    return;
+  }
+
+  const answer: Answer = req.body as Answer;
+  const resBody = {} as {
+    is_correct: Boolean;
+    answer?: Line;
+  };
+
+  try {
+    if (answer.question.line_cd === answer.answer.line_cd) {
+      resBody.is_correct = true;
+    } else {
+      resBody.is_correct = false;
+      resBody.answer = await lineFunctions.fetchLine(answer.question.line_cd);
+    }
+    res.status(200).send(resBody);
+    console.log("POST /answer end");
+  } catch (error) {
+    console.error("POST /answer error");
+    console.error(error);
+    res.status(500).send(error);
+  }
+});
+
 app.use(router);
 
 export const api = functions.https.onRequest(app);
