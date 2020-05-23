@@ -12,6 +12,7 @@ import Company from "./interfaces/Company";
 import Join from "./interfaces/Join";
 import { Choice, Quiz } from "./interfaces/Quiz";
 import Answer from "./interfaces/Answer";
+import User from "./interfaces/User";
 
 // APIサーバURLベース
 // https://us-central1-stations-api-sora0202.cloudfunctions.net/api
@@ -342,8 +343,31 @@ router.post("/answer", async (req: express.Request, res: express.Response) => {
     console.error(error);
     res.status(500).send(error);
   }
+
+  try {
+    const ref: admin.database.Reference = admin.database().ref("answers");
+    ref.push({
+      station_cd: answer.question.station_cd,
+      line_cd: answer.answer.line_cd,
+      is_correct: resBody.is_correct,
+    });
+  } catch (error) {
+    console.error("POST /answer error");
+    console.error(error);
+  }
 });
 
+router.post("/users", async (req: express.Request, res: express.Response) => {
+  console.log("POST /users");
+
+  if (Object.keys(req.body).length === 0) {
+    console.error("POST /users MISS_PARAMETER");
+    res.status(400).send({ msg: MESSAGES.MISS_PARAMETER });
+    return;
+  }
+
+  const user: User = req.body as User;
+});
 app.use(router);
 
 export const api = functions.https.onRequest(app);
